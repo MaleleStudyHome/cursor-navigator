@@ -1,0 +1,10 @@
+{
+	"id": "cursor-navigator",
+	"name": "Cursor Navigator",
+	"version": "1.0.0",
+	"minAppVersion": "1.0.0",
+	"description": "Remember cursor position per note + VS Code-style global back/forward cursor navigation history.",
+	"author": "MaleleStudyHome",
+	"authorUrl": "https://github.com/MaleleStudyHome",
+	"isDesktopOnly": false
+}

@@ -1,0 +1,21 @@
+{
+	"name": "cursor-navigator",
+	"version": "1.0.0",
+	"description": "Remember cursor position per note + VS Code-style global back/forward cursor navigation history.",
+	"main": "main.js",
+	"scripts": {
+		"build": "node main.js"
+	},
+	"keywords": [
+		"obsidian",
+		"cursor",
+		"navigation",
+		"vscode"
+	],
+	"author": "MaleleStudyHome",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/MaleleStudyHome/cursor-navigator"
+	}
+}
