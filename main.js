@@ -95,7 +95,6 @@ class RememberCursorPosition extends obsidian.Plugin {
         this.loadingFile = false;
         this.isNavigating = false;
         this.pendingNavigationTarget = null;
-        this.lastPushedKeyByFile = {};
         this.locale = 'en';
         this.lastActiveLeaf = null;
         this.lastActiveLeafFile = null;
@@ -379,10 +378,6 @@ class RememberCursorPosition extends obsidian.Plugin {
             }
         }
 
-        const key = `${fileName}|${state.cursor.from.line}:${state.cursor.from.ch}|${Math.round(state.scroll || 0)}`;
-        if (this.lastPushedKeyByFile[fileName] === key) return;
-        this.lastPushedKeyByFile[fileName] = key;
-
         // Merge consecutive same-file entries: keep only the most significant position changes
         this.mergeConsecutiveSameFileEntries(nav);
 
@@ -491,7 +486,7 @@ class RememberCursorPosition extends obsidian.Plugin {
             if (fileName && this.loadingFile && this.lastLoadedFileName === fileName) return;
 
             const activeLeaf = this.app.workspace.getMostRecentLeaf();
-            if (activeLeaf && this.loadedLeafIdList.includes(activeLeaf.id + ':' + activeLeaf.getViewState().state.file)) return;
+            const leafAlreadyLoaded = activeLeaf && this.loadedLeafIdList.includes(activeLeaf.id + ':' + activeLeaf.getViewState().state.file);
 
             this.loadedLeafIdList = [];
             this.app.workspace.iterateAllLeaves((leaf) => {
@@ -499,6 +494,23 @@ class RememberCursorPosition extends obsidian.Plugin {
                     this.loadedLeafIdList.push(leaf.id + ':' + leaf.getViewState().state.file);
                 }
             });
+
+            if (leafAlreadyLoaded) {
+                // The leaf was already loaded (e.g., navigating back to a previously open tab).
+                // We still need to update lastLoadedFileName and lastEphemeralState so that
+                // checkEphemeralStateChanged can continue tracking cursor changes.
+                if (this.lastLoadedFileName !== fileName) {
+                    // Record the old file's position before switching
+                    if (this.lastLoadedFileName && this.lastEphemeralState && !this.isNavigating) {
+                        this.pushToHistory(this.lastLoadedFileName, this.lastEphemeralState);
+                    }
+                    this.lastLoadedFileName = fileName;
+                    // Re-read current state so the 100ms timer picks up changes from here
+                    const currentState = this.getEphemeralState();
+                    this.lastEphemeralState = currentState || {};
+                }
+                return;
+            }
 
             if (this.lastLoadedFileName && this.lastLoadedFileName !== fileName && this.lastEphemeralState && !this.isNavigating) {
                 this.pushToHistory(this.lastLoadedFileName, this.lastEphemeralState);
@@ -618,40 +630,55 @@ class RememberCursorPosition extends obsidian.Plugin {
 
         // If there was a previous active leaf with a different file, record it
         if (this.lastActiveLeaf && this.lastActiveLeafFile && this.lastActiveLeafFile !== newFile) {
-            // Try to get the editor state from the old leaf
-            const oldView = this.lastActiveLeaf.view;
-            if (oldView && oldView.editor && oldView.currentMode) {
-                try {
-                    const editor = oldView.editor;
-                    const from = editor.getCursor('anchor');
-                    const to = editor.getCursor('head');
-                    let scroll = 0;
-                    try {
-                        scroll = oldView.currentMode.getScroll();
-                        if (typeof scroll === 'number') scroll = Number(scroll.toFixed(4));
-                    } catch (e) { scroll = 0; }
-
-                    if (from && to) {
-                        this.pushToHistory(this.lastActiveLeafFile, {
-                            scroll: scroll,
-                            cursor: {
-                                from: { ch: from.ch, line: from.line },
-                                to: { ch: to.ch, line: to.line },
-                            },
-                        });
-                    }
-                } catch (e) {
-                    // Editor might not be accessible — fall back to db-stored position
+            if (this.lastActiveLeaf === leaf) {
+                // SAME LEAF, DIFFERENT FILE: The leaf's editor has already transitioned
+                // to the new file. We CANNOT read the old file's position from the editor.
+                // Use lastEphemeralState (maintained by 100ms polling) or fall back to DB.
+                if (this.lastEphemeralState && this.lastEphemeralState.cursor) {
+                    this.pushToHistory(this.lastActiveLeafFile, this.lastEphemeralState);
+                } else {
                     const savedState = this.db[this.lastActiveLeafFile];
                     if (savedState && savedState.cursor) {
                         this.pushToHistory(this.lastActiveLeafFile, savedState);
                     }
                 }
             } else {
-                // Fall back to db-stored position for the old leaf's file
-                const savedState = this.db[this.lastActiveLeafFile];
-                if (savedState && savedState.cursor) {
-                    this.pushToHistory(this.lastActiveLeafFile, savedState);
+                // DIFFERENT LEAF: The old leaf's editor should still have the old file's state.
+                // Try reading from the old leaf's editor, with DB fallback.
+                const oldView = this.lastActiveLeaf.view;
+                if (oldView && oldView.editor && oldView.currentMode) {
+                    try {
+                        const editor = oldView.editor;
+                        const from = editor.getCursor('anchor');
+                        const to = editor.getCursor('head');
+                        let scroll = 0;
+                        try {
+                            scroll = oldView.currentMode.getScroll();
+                            if (typeof scroll === 'number') scroll = Number(scroll.toFixed(4));
+                        } catch (e) { scroll = 0; }
+
+                        if (from && to) {
+                            this.pushToHistory(this.lastActiveLeafFile, {
+                                scroll: scroll,
+                                cursor: {
+                                    from: { ch: from.ch, line: from.line },
+                                    to: { ch: to.ch, line: to.line },
+                                },
+                            });
+                        }
+                    } catch (e) {
+                        // Editor might not be accessible — fall back to db-stored position
+                        const savedState = this.db[this.lastActiveLeafFile];
+                        if (savedState && savedState.cursor) {
+                            this.pushToHistory(this.lastActiveLeafFile, savedState);
+                        }
+                    }
+                } else {
+                    // Fall back to db-stored position for the old leaf's file
+                    const savedState = this.db[this.lastActiveLeafFile];
+                    if (savedState && savedState.cursor) {
+                        this.pushToHistory(this.lastActiveLeafFile, savedState);
+                    }
                 }
             }
         }
